@@ -1,0 +1,191 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Cyber Threat Intelligence v3.0 PRO</title>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body { 
+            background: linear-gradient(45deg, #0a0a0a, #1a1a1a); 
+            color: #00ff00; 
+            font-family: 'Courier New', monospace; 
+            min-height: 100vh;
+        }
+        .container { max-width: 1000px; margin: 0 auto; padding: 20px; }
+        h1 { color: #ff0000; text-align: center; font-size: 2.8em; margin-bottom: 10px; text-shadow: 0 0 15px #ff0000; }
+        .subtitle { text-align: center; color: #00ff88; margin-bottom: 30px; font-size: 1.2em; }
+        .stats-bar { background: #111; border: 1px solid #00ff00; padding: 15px; margin: 20px 0; border-radius: 8px; }
+        .input-group { text-align: center; margin: 30px 0; }
+        input { background: #1a1a1a; color: #00ff00; border: 2px solid #00ff00; padding: 18px 25px; font-family: monospace; font-size: 18px; width: 450px; border-radius: 8px; margin: 10px; }
+        button { background: #333; color: #00ff00; border: 2px solid #00ff00; padding: 18px 35px; font-family: monospace; font-size: 18px; border-radius: 8px; cursor: pointer; transition: all 0.3s; margin: 5px; }
+        button:hover { background: #00ff00; color: #000; box-shadow: 0 0 25px #00ff00; }
+        #threat-score { font-size: 100px; font-weight: bold; text-align: center; margin: 30px 0; text-shadow: 0 0 30px currentColor; }
+        #status { font-size: 28px; text-align: center; margin: 20px 0; min-height: 40px; }
+        .status-high { color: #ff0000 !important; }
+        .status-medium { color: #ffaa00 !important; }
+        .status-low { color: #00ff00 !important; }
+        .chart-container { width: 450px; height: 450px; margin: 30px auto; }
+        #history table { width: 100%; border-collapse: collapse; margin-top: 20px; }
+        #history th, #history td { border: 1px solid #00ff00; padding: 12px; text-align: center; }
+        #history th { background: #333; }
+        .btn-group { text-align: center; margin: 20px 0; }
+        a { color: #00ff88; text-decoration: none; font-size: 18px; margin: 0 15px; }
+        a:hover { text-decoration: underline; }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>🛡️ CYBER THREAT INTELLIGENCE v3.0 PRO</h1>
+        <p class="subtitle">CICIDS2017 | 2.8M Attacks | RandomForest | Production Ready</p>
+        
+        <div class="stats-bar">
+            <a href="/stats" target="_blank" style="float:right;">📈 View Stats</a>
+            <strong>Production Status:</strong> <span id="model-status">Loading...</span>
+        </div>
+
+        <div class="input-group">
+            <input id="features" placeholder="Flow Duration, Fwd Packets, Bwd Packets (e.g., 25000,89,2)" />
+            <br>
+            <button onclick="predictThreat()">🚨 ANALYZE THREAT</button>
+            <button onclick="location.href='/train'">🤖 TRAIN PRODUCTION MODEL</button>
+            <button onclick="location.href='/init'">🗄️ INIT DB</button>
+            <br>
+            <div id="threat-score">0.00%</div>
+            <div id="status">Ready for real-time threat detection...</div>
+        </div>
+
+        <div class="chart-container">
+            <canvas id="threatChart"></canvas>
+        </div>
+
+        <div id="history">
+            <h3 style="text-align:center; margin-bottom:20px;">📊 Threat Intelligence Log (Last 20)</h3>
+            <p style="text-align:center; color:#00ff88;">Click ANALYZE to populate threat history...</p>
+        </div>
+    </div>
+
+    <script>
+        let chart = null;
+        
+        // Check model status
+        fetch('/stats').then(r => r.text()).then(stats => {
+            document.getElementById('model-status').innerText = '✅ PRODUCTION READY';
+        }).catch(() => {
+            document.getElementById('model-status').innerText = '⚠️ Train model first';
+        });
+        
+        async function predictThreat() {
+            const statusEl = document.getElementById('status');
+            const scoreEl = document.getElementById('threat-score');
+            
+            statusEl.innerText = '🔍 Production model analyzing...';
+            statusEl.className = '';
+            
+            const feats = document.getElementById('features').value.split(',').map(f => parseFloat(f.trim()));
+            if (feats.length !== 3) {
+                statusEl.innerText = '❌ Enter EXACTLY 3 features: Flow Duration, Fwd Packets, Bwd Packets';
+                return;
+            }
+            
+            try {
+                const response = await fetch('/predict', {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify({features: feats})
+                });
+                const data = await response.json();
+                
+                if (data.error) {
+                    statusEl.innerText = data.error;
+                    statusEl.className = 'status-medium';
+                    return;
+                }
+                
+                scoreEl.innerText = data.confidence;
+                
+                if (data.threat_score > 0.8) {
+                    statusEl.innerHTML = `🚨 <strong>${data.prediction}</strong> - ${data.threat_level} THREAT (${data.confidence})`;
+                    statusEl.className = 'status-high';
+                    scoreEl.style.color = '#ff0000';
+                } else if (data.threat_score > 0.6) {
+                    statusEl.innerHTML = `⚠️ ${data.prediction} - ${data.threat_level} RISK (${data.confidence})`;
+                    statusEl.className = 'status-medium';
+                    scoreEl.style.color = '#ffaa00';
+                } else {
+                    statusEl.innerHTML = `✅ <strong>${data.prediction}</strong> - SAFE (${data.confidence})`;
+                    statusEl.className = 'status-low';
+                    scoreEl.style.color = '#00ff00';
+                }
+                
+                updateChart(data.threat_score);
+                loadHistory();
+            } catch (e) {
+                statusEl.innerText = '❌ Production model not ready. Visit /train';
+                statusEl.className = 'status-medium';
+            }
+        }
+        
+        function updateChart(threatScore) {
+            const ctx = document.getElementById('threatChart').getContext('2d');
+            if (chart) chart.destroy();
+            
+            chart = new Chart(ctx, {
+                type: 'doughnut',
+                data: {
+                    labels: ['Threat Risk', 'Safe Traffic'],
+                    datasets: [{
+                        data: [threatScore, 1-threatScore],
+                        backgroundColor: ['#ff0000', '#00ff00'],
+                        borderWidth: 3,
+                        borderColor: '#333'
+                    }]
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    plugins: { 
+                        legend: { 
+                            position: 'bottom', 
+                            labels: { color: '#00ff00', font: { size: 14 } }
+                        }
+                    }
+                }
+            });
+        }
+        
+        async function loadHistory() {
+            try {
+                const response = await fetch('/history');
+                const historyData = await response.json();
+                const historyDiv = document.getElementById('history');
+                
+                if (historyData.length === 0) {
+                    historyDiv.innerHTML = '<h3 style="text-align:center;">📊 Threat Intelligence Log</h3><p style="text-align:center; color:#00ff88;">No threat predictions yet. Analyze network traffic!</p>';
+                    return;
+                }
+                
+                let table = '<h3 style="text-align:center;">📊 Threat Intelligence Log (Last 20)</h3><table>';
+                table += '<tr><th>ID</th><th>Features</th><th>Prediction</th><th>Confidence</th><th>Time</th></tr>';
+                
+                historyData.slice(0, 10).forEach(row => {
+                    const color = row.prediction.includes('BENIGN') ? '#00ff00' : '#ff0000';
+                    table += `<tr>
+                        <td style="background:#222">${row.id}</td>
+                        <td>${row.features}</td>
+                        <td style="color:${color}; font-weight:bold">${row.prediction}</td>
+                        <td>${(row.confidence*100).toFixed(1)}%</td>
+                        <td>${row.timestamp}</td>
+                    </tr>`;
+                });
+                table += '</table>';
+                historyDiv.innerHTML = table;
+            } catch (e) {
+                document.getElementById('history').innerHTML = '<p style="text-align:center; color:#ffaa00;">Loading threat intelligence...</p>';
+            }
+        }
+        
+        loadHistory();
+        setInterval(loadHistory, 3000);
+    </script>
+</body>
+</html>
